@@ -258,11 +258,9 @@
 
 (defun lsp-treemacs--after-diagnostics ()
   "After diagnostics handler."
-  (condition-case _err
-      (with-current-buffer (get-buffer-create "*LSP Error List*")
-        (save-excursion
-          (treemacs-update-node '(:custom LSP-Errors) t)))
-    (error)))
+  (with-current-buffer (get-buffer-create "*LSP Error List*")
+    (save-excursion
+      (treemacs-update-node '(:custom LSP-Errors) t))))
 
 (defun lsp-treemacs--kill-buffer ()
   "Kill buffer hook."
@@ -281,7 +279,7 @@
 
 ;;;###autoload
 (defun lsp-treemacs-errors-list ()
-  "Display treemacs error list."
+  "Display error list."
   (interactive)
 
   (-if-let (buffer (get-buffer "*LSP Error List*"))
@@ -297,6 +295,59 @@
 
       (add-hook 'lsp-after-diagnostics-hook #'lsp-treemacs--after-diagnostics)
       (add-hook 'kill-buffer-hook 'lsp-treemacs--kill-buffer nil t))))
+
+(treemacs-define-expandable-node lsp-symbol
+  :icon-open treemacs-icon-root
+  :icon-closed treemacs-icon-root
+  :query-function (treemacs-button-get btn :children)
+  :ret-action 'lsp-treemacs-open-file
+  :render-action
+  (treemacs-render-node
+   :icon treemacs-icon-root
+   :label-form (gethash "name" item)
+   :state treemacs-lsp-symbol-closed-state
+   :key-form (gethash "name" item)
+   :more-properties (:children (append (gethash "children" item) nil))))
+
+(defvar-local lsp-treemacs--symbols nil)
+
+(treemacs-define-variadic-node lsp-symbols-list
+  :query-function lsp-treemacs--symbols
+  :render-action
+  (treemacs-render-node
+   :icon treemacs-icon-root
+   :label-form (gethash "name" item)
+   :state treemacs-lsp-symbol-closed-state
+   :key-form (gethash "name" item)
+   :more-properties (:children (append (gethash "children" item) nil)))
+  :root-key-form 'LSP-Symbols)
+
+(defun lsp-treemacs--update-symbols ()
+  "After diagnostics handler."
+  (save-excursion
+    (with-current-buffer "*LSP Symbols List*"
+     (save-excursion
+       (treemacs-update-node '(:custom LSP-Symbols) t)))))
+
+(defun lsp-treemacs--update ()
+  (lsp-request-async "textDocument/documentSymbol" `(:textDocument ,(lsp--text-document-identifier))
+                     (lambda (document-symbols)
+                       (with-current-buffer "*LSP Symbols List*"
+                         (setq-local lsp-treemacs--symbols document-symbols)
+                         (lsp-treemacs--update-symbols)))
+                     :mode 'alive))
+
+;; ;;;###autoload
+(let* ((buffer (get-buffer-create "*LSP Symbols List*"))
+       (window (display-buffer-in-side-window buffer '((side . left)
+                                                       (slot . 2)))))
+  (select-window window)
+  (set-window-dedicated-p window t)
+  (treemacs-initialize)
+  (treemacs-LSP-SYMBOLS-LIST-extension))
+
+;; (setq lsp-treemacs--symbols-timer (run-at-time 0 1.0 #'lsp-treemacs--update))
+;; (add-hook 'buffer-list-update-hook 'lsp-treemacs--symbols-window-change)
 
 (provide 'lsp-treemacs)
 ;;; lsp-treemacs.el ends here
