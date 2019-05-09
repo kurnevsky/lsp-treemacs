@@ -299,17 +299,19 @@
 (treemacs-define-expandable-node lsp-symbol
   :icon-open treemacs-icon-root
   :icon-closed treemacs-icon-root
-  :query-function (treemacs-button-get btn :children)
-  :ret-action 'lsp-treemacs-open-file
+  :query-function (append (gethash "children" (treemacs-button-get btn :item)) nil)
+  :ret-action 'lsp-treemacs-goto-symbol
   :render-action
   (treemacs-render-node
    :icon treemacs-icon-root
    :label-form (gethash "name" item)
    :state treemacs-lsp-symbol-closed-state
    :key-form (gethash "name" item)
-   :more-properties (:children (append (gethash "children" item) nil))))
+   :more-properties (:item item)))
 
 (defvar-local lsp-treemacs--symbols nil)
+(defvar-local lsp-treemacs--symbols-tick nil)
+(defvar lsp-treemacs--symbols-current-buffer nil)
 
 (treemacs-define-variadic-node lsp-symbols-list
   :query-function lsp-treemacs--symbols
@@ -319,32 +321,64 @@
    :label-form (gethash "name" item)
    :state treemacs-lsp-symbol-closed-state
    :key-form (gethash "name" item)
-   :more-properties (:children (append (gethash "children" item) nil)))
+   :more-properties (:item item))
   :root-key-form 'LSP-Symbols)
 
 (defun lsp-treemacs--update-symbols ()
   "After diagnostics handler."
   (save-excursion
     (with-current-buffer "*LSP Symbols List*"
-     (save-excursion
-       (treemacs-update-node '(:custom LSP-Symbols) t)))))
+      (save-excursion
+        (treemacs-update-node '(:custom LSP-Symbols) t)))))
 
 (defun lsp-treemacs--update ()
-  (lsp-request-async "textDocument/documentSymbol" `(:textDocument ,(lsp--text-document-identifier))
-                     (lambda (document-symbols)
-                       (with-current-buffer "*LSP Symbols List*"
-                         (setq-local lsp-treemacs--symbols document-symbols)
-                         (lsp-treemacs--update-symbols)))
-                     :mode 'alive))
+  ;; (message "enter")
+
+  (if (lsp-workspaces)
+      (progn
+        ;; (message "pass")
+        (unless (and lsp-treemacs--symbols-tick
+                     (eq lsp-treemacs--symbols-tick (buffer-modified-tick)))
+          (message "pass2")
+          (lsp-request-async "textDocument/documentSymbol" `(:textDocument ,(lsp--text-document-identifier))
+                             (lambda (document-symbols)
+                               (with-current-buffer "*LSP Symbols List*"
+                                 (message "called %s" lsp-treemacs--symbols-tick )
+                                 (setq-local lsp-treemacs--symbols document-symbols)
+                                 (lsp-treemacs--update-symbols)))
+                             :mode 'alive)
+          (setq-local lsp-treemacs--symbols-tick (buffer-modified-tick))
+          (setq lsp-treemacs--symbols-current-buffer (current-buffer))))
+    ;; (message "pass2")
+    ;; (with-current-buffer "*LSP Symbols List*"
+    ;;   (setq-local lsp-treemacs--symbols nil)
+    ;;   (lsp-treemacs--update-symbols))
+    ))
+
+(defun lsp-treemacs-goto-symbol (&rest _)
+  "Goto the symbol at point."
+  (interactive)
+  (let ((p (->> (button-get (treemacs-node-at-point) :item)
+                (gethash "selectionRange")
+                (gethash "start")
+                lsp--position-to-point)))
+    (pop-to-buffer lsp-treemacs--symbols-current-buffer)
+    (goto-char p)))
 
 ;; ;;;###autoload
-(let* ((buffer (get-buffer-create "*LSP Symbols List*"))
-       (window (display-buffer-in-side-window buffer '((side . left)
-                                                       (slot . 2)))))
-  (select-window window)
-  (set-window-dedicated-p window t)
-  (treemacs-initialize)
-  (treemacs-LSP-SYMBOLS-LIST-extension))
+(defun lsp-treemacs-symbols ()
+  (interactive)
+  (if-let (buf (get-buffer "*LSP Symbols List*"))
+      (select-window (display-buffer-in-side-window buffer '((side . left)
+                                                             (slot . 2))))
+    (let* ((buffer (get-buffer-create "*LSP Symbols List*"))
+           (window (display-buffer-in-side-window buffer '((side . left)
+                                                           (slot . 2)))))
+      (select-window window)
+      (set-window-dedicated-p window t)
+      (treemacs-initialize)
+      (treemacs-LSP-SYMBOLS-LIST-extension)
+      (lsp-treemacs--update))))
 
 ;; (setq lsp-treemacs--symbols-timer (run-at-time 0 1.0 #'lsp-treemacs--update))
 ;; (add-hook 'buffer-list-update-hook 'lsp-treemacs--symbols-window-change)
